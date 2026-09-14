@@ -1,0 +1,599 @@
+// This is your Prisma schema file for VetPet PK
+// Multi-tenant Veterinary Clinic Management SaaS - PostgreSQL / Supabase
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─────────────────────────────────────────────
+// SAAS PLANS & SUBSCRIPTIONS
+// ─────────────────────────────────────────────
+
+model Plan {
+  id              Int      @id @default(autoincrement())
+  name            String   @db.VarChar(100)  // Starter, Professional, Business
+  price_monthly   Decimal  @db.Decimal(10, 2)
+  max_doctors     Int      @default(2)
+  max_staff       Int      @default(5)
+  max_pets        Int      @default(200)
+  storage_gb      Int      @default(5)
+  has_reports     Boolean  @default(false)
+  has_ai          Boolean  @default(false)
+  has_whatsapp    Boolean  @default(false)
+  is_active       Boolean  @default(true)
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+  clinics         Clinic[]
+}
+
+// ─────────────────────────────────────────────
+// CLINICS (TENANTS)
+// ─────────────────────────────────────────────
+
+model Clinic {
+  id                Int       @id @default(autoincrement())
+  name              String    @db.VarChar(255)
+  slug              String    @unique @db.VarChar(255)
+  logo_path         String?   @db.VarChar(500)
+  phone             String    @db.VarChar(20)
+  whatsapp_number   String?   @db.VarChar(20)
+  email             String?   @db.VarChar(255)
+  address           String    @db.Text
+  city              String    @db.VarChar(100)
+  tax_number        String?   @db.VarChar(50)
+  currency          String    @default("PKR") @db.VarChar(10)
+  plan_id           Int?
+  status            ClinicStatus @default(TRIAL)
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  plan              Plan?           @relation(fields: [plan_id], references: [id])
+  users             User[]
+  pet_owners        PetOwner[]
+  pets              Pet[]
+  appointments      Appointment[]
+  consultations     Consultation[]
+  prescriptions     Prescription[]
+  vaccinations      Vaccination[]
+  lab_tests         LabTest[]
+  medicines         Medicine[]
+  invoices          Invoice[]
+  expenses          Expense[]
+  reminders         Reminder[]
+  audit_logs        AuditLog[]
+
+  @@index([slug])
+}
+
+enum ClinicStatus {
+  TRIAL
+  ACTIVE
+  SUSPENDED
+}
+
+// ─────────────────────────────────────────────
+// USERS
+// ─────────────────────────────────────────────
+
+model User {
+  id               Int       @id @default(autoincrement())
+  clinic_id        Int?      // NULL for super_admin
+  name             String    @db.VarChar(255)
+  email            String    @unique @db.VarChar(255)
+  phone            String    @db.VarChar(20)
+  password_hash    String    @db.VarChar(255)
+  role             UserRole
+  specialization   String?   @db.VarChar(255)
+  license_number   String?   @db.VarChar(100)
+  is_active        Boolean   @default(true)
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+
+  clinic                Clinic?          @relation(fields: [clinic_id], references: [id], onDelete: Cascade)
+  consultations_done    Consultation[]   @relation("DoctorConsultations")
+  appointments_assigned Appointment[]    @relation("DoctorAppointments")
+  vaccinations_done     Vaccination[]    @relation("DoctorVaccinations")
+  lab_tests_requested   LabTest[]        @relation("DoctorLabTests")
+  audit_logs            AuditLog[]
+
+  @@index([clinic_id, role])
+  @@index([email])
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  CLINIC_ADMIN
+  DOCTOR
+  RECEPTIONIST
+  PET_OWNER
+}
+
+// ─────────────────────────────────────────────
+// PET OWNERS
+// ─────────────────────────────────────────────
+
+model PetOwner {
+  id               Int       @id @default(autoincrement())
+  clinic_id        Int
+  name             String    @db.VarChar(255)
+  phone            String    @db.VarChar(20)
+  whatsapp_number  String?   @db.VarChar(20)
+  email            String?   @db.VarChar(255)
+  address          String?   @db.Text
+  city             String    @default("Lahore") @db.VarChar(100)
+  notes            String?   @db.Text
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+
+  clinic   Clinic @relation(fields: [clinic_id], references: [id], onDelete: Cascade)
+  pets     Pet[]
+  invoices Invoice[]
+
+  @@index([clinic_id, phone, name])
+}
+
+// ─────────────────────────────────────────────
+// SPECIES & BREEDS
+// ─────────────────────────────────────────────
+
+model Species {
+  id     Int     @id @default(autoincrement())
+  name   String  @unique @db.VarChar(100)
+  breeds Breed[]
+  pets   Pet[]
+}
+
+model Breed {
+  id         Int     @id @default(autoincrement())
+  species_id Int
+  name       String  @db.VarChar(100)
+  species    Species @relation(fields: [species_id], references: [id], onDelete: Cascade)
+  pets       Pet[]
+}
+
+// ─────────────────────────────────────────────
+// PETS
+// ─────────────────────────────────────────────
+
+model Pet {
+  id                  Int       @id @default(autoincrement())
+  clinic_id           Int
+  owner_id            Int
+  species_id          Int
+  breed_id            Int?
+  name                String    @db.VarChar(255)
+  gender              PetGender @default(UNKNOWN)
+  date_of_birth       DateTime? @db.Date
+  age_years           Int       @default(0)
+  age_months          Int       @default(0)
+  color               String?   @db.VarChar(100)
+  weight_kg           Decimal?  @db.Decimal(5, 2)
+  microchip_id        String?   @db.VarChar(100)
+  registration_no     String?   @db.VarChar(100)
+  photo_path          String?   @db.VarChar(500)
+  allergies           String?   @db.Text
+  existing_conditions String?   @db.Text
+  notes               String?   @db.Text
+  is_active           Boolean   @default(true)
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @updatedAt
+  deleted_at          DateTime?
+
+  clinic        Clinic         @relation(fields: [clinic_id], references: [id], onDelete: Cascade)
+  owner         PetOwner       @relation(fields: [owner_id], references: [id], onDelete: Cascade)
+  species       Species        @relation(fields: [species_id], references: [id])
+  breed         Breed?         @relation(fields: [breed_id], references: [id], onDelete: SetNull)
+  appointments  Appointment[]
+  consultations Consultation[]
+  vaccinations  Vaccination[]
+  lab_tests     LabTest[]
+  invoices      Invoice[]
+  weight_logs   WeightLog[]
+
+  @@index([clinic_id, name, microchip_id])
+}
+
+enum PetGender {
+  MALE
+  FEMALE
+  UNKNOWN
+}
+
+model WeightLog {
+  id         Int      @id @default(autoincrement())
+  pet_id     Int
+  weight_kg  Decimal  @db.Decimal(5, 2)
+  recorded_at DateTime @default(now())
+  notes      String?  @db.VarChar(255)
+  pet        Pet      @relation(fields: [pet_id], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────
+// APPOINTMENTS & QUEUE
+// ─────────────────────────────────────────────
+
+model Appointment {
+  id               Int               @id @default(autoincrement())
+  clinic_id        Int
+  pet_id           Int
+  doctor_id        Int
+  appointment_date DateTime          @db.Date
+  start_time       String            @db.VarChar(10) // "09:30"
+  end_time         String            @db.VarChar(10) // "10:00"
+  appointment_type AppointmentType   @default(CONSULTATION)
+  status           AppointmentStatus @default(SCHEDULED)
+  token_number     Int?
+  reason           String?           @db.Text
+  notes            String?           @db.Text
+  created_at       DateTime          @default(now())
+  updated_at       DateTime          @updatedAt
+
+  clinic       Clinic        @relation(fields: [clinic_id], references: [id], onDelete: Cascade)
+  pet          Pet           @relation(fields: [pet_id], references: [id], onDelete: Cascade)
+  doctor       User          @relation("DoctorAppointments", fields: [doctor_id], references: [id])
+  consultation Consultation?
+
+  @@index([clinic_id, appointment_date, doctor_id])
+}
+
+enum AppointmentType {
+  CONSULTATION
+  VACCINATION
+  SURGERY
+  GROOMING
+  FOLLOW_UP
+  EMERGENCY
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  CHECKED_IN
+  IN_CONSULTATION
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+// ─────────────────────────────────────────────
+// CONSULTATIONS (MEDICAL RECORDS CORE)
+// ─────────────────────────────────────────────
+
+model Consultation {
+  id                  Int       @id @default(autoincrement())
+  clinic_id           Int
+  appointment_id      Int?      @unique
+  pet_id              Int
+  doctor_id           Int
+  consultation_date   DateTime
+  weight_kg           Decimal?  @db.Decimal(5, 2)
+  temperature_f       Decimal?  @db.Decimal(4, 1)
+  heart_rate_bpm      Int?
+  respiratory_rate    Int?
+  chief_complaint     String    @db.Text
+  symptoms            String?   @db.Text
+  physical_exam       String?   @db.Text
+  diagnosis           String    @db.Text
+  treatment_plan      String?   @db.Text
+  clinical_notes      String?   @db.Text
+  follow_up_date      DateTime? @db.Date
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @updatedAt
+
+  clinic       Clinic        @relation(fields: [clinic_id], references: [id], onDelete: Cascade)
+  appointment  Appointment?  @relation(fields: [appointment_id], references: [id], onDelete: SetNull)
+  pet          Pet           @relation(fields: [pet_id], references: [id], onDelete: Cascade)
+  doctor       User          @relation("DoctorConsultations", fields: [doctor_id], references: [id])
+  prescriptions Prescription[]
+  lab_tests    LabTest[]
+  invoice_items InvoiceItem[]
+
+  @@index([clinic_id, pet_id])
+}
+
+// ─────────────────────────────────────────────
+// PRESCRIPTIONS
+// ─────────────────────────────────────────────
+
+model Prescription {
+  id               Int      @id @default(autoincrement())
+  clinic_id        Int
+  consultation_id  Int
+  pdf_path         String?  @db.VarChar(500)
+  instructions     String?  @db.Text
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  clinic       Clinic             @relation(fields: [clinic_id], references: [id], onDelete: Cascade)
+  consultation Consultation       @relation(fields: [consultation_id], references: [id], onDelete: Cascade)
+  items        PrescriptionItem[]
+}
+
+model PrescriptionItem {
+  id              Int          @id @default(autoincrement())
+  prescription_id Int
+  medicine_id     Int
+  dosage          String       @db.VarChar(100)  // "5ml", "1 tablet"
+  frequency       String       @db.VarChar(100)  // "Twice daily"
+  duration_days   Int
+  instructions    String?      @db.Text          // "After food"
+
+  prescription Prescription @relation(fields: [prescription_id], references: [id], onDelete: Cascade)
+  medicine     Medicine     @relation(fields: [medicine_id], references: [id])
+}
+
+// ─────────────────────────────────────────────
+// VACCINATIONS
+// ─────────────────────────────────────────────
+
+model Vaccination {
+  id                Int       @id @default(autoincrement())
+  clinic_id         Int
+  pet_id            Int
+  doctor_id         Int
+  vaccine_name      String    @db.VarChar(255)
+  batch_number      String?   @db.VarChar(100)
+  manufacturer      String?   @db.VarChar(100)
+  administered_date DateTime  @db.Date
+  next_due_date     DateTime  @db.Date
+  notes             String?   @db.Text
+  reminder_sent     Boolean   @default(false)
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  clinic Clinic @relation(fields: [clinic_id], references: [id], onDelete: Cascade)
+  pet    Pet    @relation(fields: [pet_id], references: [id], onDelete: Cascade)
+  doctor User   @relation("DoctorVaccinations", fields: [doctor_id], references: [id])
+
+  @@index([clinic_id, next_due_date])
+}
+
+// ─────────────────────────────────────────────
+// LAB TESTS
+// ─────────────────────────────────────────────
+
+model LabTest {
+  id              Int           @id @default(autoincrement())
+  clinic_id       Int
+  pet_id          Int
+  doctor_id       Int
+  consultation_id Int?
+  test_name       String        @db.VarChar(255)
+  test_type       String        @db.VarChar(100)  // CBC, Urinalysis, X-Ray, etc.
+  status          LabTestStatus @default(REQUESTED)
+  result_notes    String?       @db.Text
+  report_path     String?       @db.VarChar(500)
+  requested_at    DateTime      @default(now())
+  completed_at    DateTime?
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
+
+  clinic       Clinic        @relation(fields: [clinic_id], references: [id], onDelete: Cascade)
+  pet          Pet           @relation(fields: [pet_id], references: [id], onDelete: Cascade)
+  doctor       User          @relation("DoctorLabTests", fields: [doctor_id], references: [id])
+  consultation Consultation? @relation(fields: [consultation_id], references: [id], onDelete: SetNull)
+
+  @@index([clinic_id, pet_id])
+}
+
+enum LabTestStatus {
+  REQUESTED
+  SAMPLE_COLLECTED
+  PROCESSING
+  RESULT_AVAILABLE
+  REVIEWED
+}
+
+// ─────────────────────────────────────────────
+// MEDICINE INVENTORY
+// ─────────────────────────────────────────────
+
+model Medicine {
+  id                Int      @id @default(autoincrement())
+  clinic_id         Int
+  name              String   @db.VarChar(255)
+  generic_name      String?  @db.VarChar(255)
+  category          String   @db.VarChar(100)  // Antibiotic, Vaccine, Dewormer, etc.
+  unit              String   @default("Tablet") @db.VarChar(50)
+  purchase_price    Decimal  @db.Decimal(10, 2)
+  selling_price     Decimal  @db.Decimal(10, 2)
+  stock_quantity    Int      @default(0)
+  min_stock_alert   Int      @default(5)
+  is_active         Boolean  @default(true)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  clinic             Clinic             @relation(fields: [clinic_id], references: [id], onDelete: Cascade)
+  batches            MedicineBatch[]
+  prescription_items PrescriptionItem[]
+  invoice_items      InvoiceItem[]
+
+  @@index([clinic_id, name])
+}
+
+model MedicineBatch {
+  id             Int      @id @default(autoincrement())
+  medicine_id    Int
+  batch_number   String   @db.VarChar(100)
+  expiry_date    DateTime @db.Date
+  quantity       Int      @default(0)
+  purchase_price Decimal  @db.Decimal(10, 2)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  medicine Medicine @relation(fields: [medicine_id], references: [id], onDelete: Cascade)
+
+  @@index([medicine_id, expiry_date])
+}
+
+// ─────────────────────────────────────────────
+// INVOICES & BILLING
+// ─────────────────────────────────────────────
+
+model Invoice {
+  id              Int           @id @default(autoincrement())
+  clinic_id       Int
+  invoice_number  String        @unique @db.VarChar(50)
+  pet_id          Int
+  owner_id        Int
+  consultation_id Int?
+  subtotal        Decimal       @default(0) @db.Decimal(10, 2)
+  discount        Decimal       @default(0) @db.Decimal(10, 2)
+  tax             Decimal       @default(0) @db.Decimal(10, 2)
+  total_amount    Decimal       @db.Decimal(10, 2)
+  paid_amount     Decimal       @default(0) @db.Decimal(10, 2)
+  due_amount      Decimal       @db.Decimal(10, 2)
+  status          InvoiceStatus @default(UNPAID)
+  notes           String?       @db.Text
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
+
+  clinic   Clinic        @relation(fields: [clinic_id], references: [id], onDelete: Cascade)
+  pet      Pet           @relation(fields: [pet_id], references: [id])
+  owner    PetOwner      @relation(fields: [owner_id], references: [id])
+  items    InvoiceItem[]
+  payments Payment[]
+
+  @@index([clinic_id, status, owner_id])
+}
+
+model InvoiceItem {
+  id              Int         @id @default(autoincrement())
+  invoice_id      Int
+  item_type       ItemType
+  item_id         Int?        // FK to consultation/medicine/etc. (polymorphic-style)
+  medicine_id     Int?
+  consultation_id Int?
+  description     String      @db.VarChar(255)
+  quantity        Int         @default(1)
+  unit_price      Decimal     @db.Decimal(10, 2)
+  total_price     Decimal     @db.Decimal(10, 2)
+
+  invoice      Invoice       @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+  medicine     Medicine?     @relation(fields: [medicine_id], references: [id])
+  consultation Consultation? @relation(fields: [consultation_id], references: [id])
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+  CANCELLED
+}
+
+enum ItemType {
+  CONSULTATION
+  MEDICINE
+  VACCINE
+  LAB_TEST
+  PROCEDURE
+  OTHER
+}
+
+model Payment {
+  id             Int           @id @default(autoincrement())
+  invoice_id     Int
+  amount         Decimal       @db.Decimal(10, 2)
+  payment_method PaymentMethod @default(CASH)
+  reference_no   String?       @db.VarChar(100)  // JazzCash/EasyPaisa txn ID
+  notes          String?       @db.VarChar(255)
+  paid_at        DateTime      @default(now())
+
+  invoice Invoice @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+}
+
+enum PaymentMethod {
+  CASH
+  EASYPAISA
+  JAZZCASH
+  BANK_TRANSFER
+  CARD
+  OTHER
+}
+
+// ─────────────────────────────────────────────
+// EXPENSES
+// ─────────────────────────────────────────────
+
+model Expense {
+  id          Int      @id @default(autoincrement())
+  clinic_id   Int
+  category    String   @db.VarChar(100)  // Rent, Salary, Electricity, etc.
+  description String   @db.VarChar(255)
+  amount      Decimal  @db.Decimal(10, 2)
+  expense_date DateTime @db.Date
+  notes       String?  @db.Text
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  clinic Clinic @relation(fields: [clinic_id], references: [id], onDelete: Cascade)
+
+  @@index([clinic_id, expense_date])
+}
+
+// ─────────────────────────────────────────────
+// REMINDERS & NOTIFICATIONS
+// ─────────────────────────────────────────────
+
+model Reminder {
+  id             Int            @id @default(autoincrement())
+  clinic_id      Int
+  reminder_type  ReminderType
+  reference_id   Int            // ID of vaccination, appointment, etc.
+  phone          String         @db.VarChar(20)
+  message        String         @db.Text
+  status         ReminderStatus @default(PENDING)
+  scheduled_at   DateTime
+  sent_at        DateTime?
+  created_at     DateTime       @default(now())
+  updated_at     DateTime       @updatedAt
+
+  clinic Clinic @relation(fields: [clinic_id], references: [id], onDelete: Cascade)
+
+  @@index([clinic_id, status, scheduled_at])
+}
+
+enum ReminderType {
+  VACCINATION_DUE
+  APPOINTMENT
+  FOLLOW_UP
+  PAYMENT_DUE
+  DEWORMING
+  GROOMING
+  ANNUAL_CHECKUP
+}
+
+enum ReminderStatus {
+  PENDING
+  SENT
+  FAILED
+  CANCELLED
+}
+
+// ─────────────────────────────────────────────
+// AUDIT LOG
+// ─────────────────────────────────────────────
+
+model AuditLog {
+  id          Int      @id @default(autoincrement())
+  clinic_id   Int?
+  user_id     Int?
+  action      String   @db.VarChar(100)  // "created", "updated", "deleted"
+  model       String   @db.VarChar(100)  // "Pet", "Invoice", etc.
+  model_id    Int?
+  old_values  Json?
+  new_values  Json?
+  ip_address  String?  @db.VarChar(50)
+  created_at  DateTime @default(now())
+
+  clinic Clinic? @relation(fields: [clinic_id], references: [id], onDelete: SetNull)
+  user   User?   @relation(fields: [user_id], references: [id], onDelete: SetNull)
+
+  @@index([clinic_id, model, model_id])
+}
